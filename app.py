@@ -3,6 +3,7 @@ from google import genai
 from google.genai import types
 import os
 import re
+import time
 from PIL import Image
 from pypdf import PdfReader
 
@@ -14,29 +15,21 @@ api_keys_list = []
 if "GEMINI_API_KEYS" in st.secrets:
     api_keys_list = st.secrets["GEMINI_API_KEYS"]
 
-# Thiết lập chỉ số xoay vòng Key trong Session State
 if "key_index" not in st.session_state:
     st.session_state.key_index = 0
 
-# --- HÀM KHỞI TẠO CLIENT TỰ ĐỘNG XOAY VÒNG KEY ---
 def get_gemini_client():
     if not api_keys_list:
         return None
     idx = st.session_state.key_index % len(api_keys_list)
-    current_key = api_keys_list[idx]
-    try:
-        return genai.Client(api_key=current_key)
-    except Exception:
-        return None
+    return genai.Client(api_key=api_keys_list[idx])
 
-# --- HÀM TỰ ĐỘNG ĐỔI SANG KEY DỰ PHÒNG KHI GẶP LỖI QUÁ TẢI ---
 def rotate_api_key():
     if len(api_keys_list) > 1:
         st.session_state.key_index = (st.session_state.key_index + 1) % len(api_keys_list)
         return True
     return False
 
-# Kiểm tra hệ thống Secrets đã cấu hình chưa
 api_ready = len(api_keys_list) > 0
 
 # --- 2. HÀM CHUẨN HÓA TIẾNG VIỆT KHÔNG DẤU ---
@@ -74,7 +67,6 @@ def find_image_path(lesson_cleaned):
             return os.path.join("images", file_name)
     return None
 
-# --- 5. KHỞI TẠO TRẠNG THÁI HỆ THỐNG ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "current_step" not in st.session_state:
@@ -85,7 +77,7 @@ if "chat_session" not in st.session_state:
     st.session_state.chat_session = None
 
 SYSTEM_PROMPT = (
-    "Bạn là trợ lý học tập môn Toán của thầy Long Bình tại trường THCS Hoàng Văn Thụ. "
+    "Bạn là trợ lý học tập môn Toán và Khoa học tự nhiên của thầy Long Bình tại trường THCS Hoàng Văn Thụ. "
     "Nhiệm vụ của bạn là đóng vai một giáo viên sư phạm chuẩn mực. Dựa vào nội dung tài liệu PDF được cung cấp, "
     "hãy tìm câu hỏi bài tập mà học sinh đang yêu cầu để hướng dẫn học sinh giải theo từng bước nhỏ.\n"
     "TỪNG BƯỚC MỘT: Chỉ gợi ý hoặc đặt câu hỏi mở cho bước đầu tiên, chờ học sinh trả lời rồi mới nhận xét và hướng dẫn tiếp.\n"
@@ -97,8 +89,6 @@ pdf_content = extract_text_from_pdf("Test.pdf")
 
 # --- GIAO DIỆN ỨNG DỤNG CHÍNH ---
 if api_ready:
-    client = get_gemini_client()
-    
     if st.session_state.current_step == "CHAO_HOI":
         welcome_text = "Chào em, thầy là trợ lý của thầy Long Bình. Hôm nay em cần thầy hỗ trợ bài tập nào? (Ví dụ nhập: Bài 1, Bài 2,...)"
         st.session_state.messages = [{"role": "assistant", "content": welcome_text}]
@@ -148,7 +138,7 @@ if api_ready:
                 st.session_state.selected_lesson = None
                 st.button("Hỏi bài tập khác 🔄")
 
-    # --- LUỒNG LUÂN PHIÊN KEY ---
+    # --- LUỒNG LUÂN PHIÊN KEY KHI KHỞI TẠO ---
     elif st.session_state.current_step == "KICH_HOAT_GOI_Y_DAU_TIEN":
         with st.spinner("Thầy đang đọc tài liệu PDF để chuẩn bị câu hỏi gợi ý..."):
             lesson_org = st.session_state.selected_lesson
@@ -159,7 +149,8 @@ if api_ready:
                 f"Hãy tìm bài này trong PDF và đưa ra câu hỏi gợi mở bước đầu tiên."
             )
 
-            for _ in range(len(api_keys_list)):
+            success = False
+            for _ in range(len(api_keys_list) * 2):  # Thử xoay vòng tối đa 2 chu kỳ
                 client = get_gemini_client()
                 try:
                     st.session_state.chat_session = client.chats.create(
@@ -169,14 +160,21 @@ if api_ready:
                     response = st.session_state.chat_session.send_message(context_prompt)
                     st.session_state.messages.append({"role": "assistant", "content": response.text})
                     st.session_state.current_step = "DANG_GOI_Y"
+                    success = True
                     st.rerun()
+                    break
                 except Exception as e:
-                    if "429" in str(e) and rotate_api_key():
-                        continue  
+                    if "429" in str(e):
+                        rotate_api_key()
+                        time.sleep(1.5)  # Nghỉ ngắn giải phóng IP nghẽn
+                        continue
                     else:
-                        st.error(f"Hệ thống bận (Lỗi: {e}). Thầy/em chờ vài giây rồi gõ lại nhé!")
+                        st.error(f"Hệ thống gặp gián đoạn nhỏ: {e}")
                         break
+            if not success:
+                st.error("Các đầu kết nối miễn phí hiện đang bận do quá nhiều học sinh truy cập cùng lúc. Thầy/em vui lòng tải lại trang (F5) sau 15 giây nhé!")
 
+    # --- LUỒNG LUÂN PHIÊN KEY KHI ĐANG TRAO ĐỔI ---
     elif st.session_state.current_step == "DANG_GOI_Y":
         if user_input := st.chat_input("Nhập câu trả lời hoặc thắc mắc của em..."):
             st.session_state.messages.append({"role": "user", "content": user_input})
@@ -188,27 +186,37 @@ if api_ready:
                 st.session_state.selected_lesson = None
                 st.rerun()
             else:
-                for _ in range(len(api_keys_list)):
+                success = False
+                for _ in range(len(api_keys_list) * 2):
                     try:
                         response = st.session_state.chat_session.send_message(user_input)
                         st.session_state.messages.append({"role": "assistant", "content": response.text})
+                        success = True
                         st.rerun()
+                        break
                     except Exception as e:
-                        if "429" in str(e) and rotate_api_key():
+                        if "429" in str(e):
+                            rotate_api_key()
+                            time.sleep(1.5)
+                            # Khởi tạo lại session chat sạch với Key mới bảo đảm mạch văn liên tục
                             client = get_gemini_client()
                             try:
                                 st.session_state.chat_session = client.chats.create(
                                     model=MODEL_NAME,
                                     config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT)
                                 )
-                                full_context = f"Tài liệu PDF ngữ cảnh:\n{pdf_content}\n\nHọc sinh đang trao đổi tiếp câu hỏi bài tập. Đây là câu trả lời mới nhất của học sinh: {user_input}"
+                                full_context = f"Tài liệu PDF ngữ cảnh:\n{pdf_content}\n\nHọc sinh đang giải tiếp bài tập. Đây là câu trả lời mới nhất của học sinh: {user_input}"
                                 response = st.session_state.chat_session.send_message(full_context)
                                 st.session_state.messages.append({"role": "assistant", "content": response.text})
+                                success = True
                                 st.rerun()
+                                break
                             except Exception:
                                 continue
                         else:
-                            st.warning("🤖 AI đang xử lý dồn ứ tin nhắn. Em hãy chờ 5 giây rồi gõ lại câu trả lời nhé!")
+                            st.error("Đường truyền AI bận đột xuất, em hãy gửi lại câu trả lời này một lần nữa nhé.")
                             break
+                if not success:
+                    st.warning("Hệ thống đang điều phối lưu lượng kết nối, em hãy chờ vài giây rồi gõ lại nhé.")
 else:
     st.error("Hệ thống chưa được cấu hình API Keys ngầm. Thầy Bình vui lòng cài đặt Keys trong mục Secrets của Streamlit Cloud nhé!")
