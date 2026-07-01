@@ -17,7 +17,7 @@ if api_key_input:
     try:
         genai.configure(api_key=api_key_input)
         # Sử dụng gemini-1.5-flash để tối ưu tốc độ phản hồi
-        model = genai.GenerativeModel("gemini-pro")
+        model = genai.GenerativeModel("gemini-2.5-flash")
         api_ready = True
     except Exception as e:
         st.sidebar.error(f"Lỗi cấu hình API Key: {e}")
