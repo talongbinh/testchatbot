@@ -1,5 +1,6 @@
 import streamlit as st
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 import os
 import re
 from PIL import Image
@@ -12,12 +13,13 @@ st.title("🤖 Trợ Lý Học Tập - Thầy Long Bình")
 st.sidebar.header("🔑 Cấu hình hệ thống")
 api_key_input = st.sidebar.text_input("Nhập API Key của thầy:", type="password")
 
+client = None
 api_ready = False
+
 if api_key_input:
     try:
-        genai.configure(api_key=api_key_input)
-        # Sử dụng gemini-1.5-flash để tối ưu tốc độ phản hồi
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        client = genai.Client(api_key=api_key_input)
+        MODEL_NAME = "gemini-2.5-flash"
         api_ready = True
     except Exception as e:
         st.sidebar.error(f"Lỗi cấu hình API Key: {e}")
@@ -50,7 +52,7 @@ def extract_text_from_pdf(pdf_path="Test.pdf"):
     except Exception:
         return ""
 
-# --- 4. HÀM TÌM ĐƯỜNG DẪN ẢNH ĐÁP ÁN TRONG THƯ MỤC IMAGES ---
+# --- 4. HÀM TÌM ĐƯỜNG DẪN ẢNH ĐÁP ÁN ---
 def find_image_path(lesson_cleaned):
     if not os.path.exists("images"):
         return None
@@ -60,13 +62,15 @@ def find_image_path(lesson_cleaned):
             return os.path.join("images", file_name)
     return None
 
-# --- 5. KHỞI TẠO TRẠNG THÁI HỆ THỐNG (SESSION STATE) ---
+# --- 5. KHỞI TẠO TRẠNG THÁI HỆ THỐNG ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "current_step" not in st.session_state:
     st.session_state.current_step = "CHAO_HOI"
 if "selected_lesson" not in st.session_state:
     st.session_state.selected_lesson = None
+if "chat_session" not in st.session_state:
+    st.session_state.chat_session = None
 
 SYSTEM_PROMPT = (
     "Bạn là trợ lý học tập môn Toán và Khoa học tự nhiên của thầy Long Bình tại trường THCS Hoàng Văn Thụ. "
@@ -76,23 +80,20 @@ SYSTEM_PROMPT = (
     "TUYỆT ĐỐI KHÔNG ĐƯỢC giải hết toàn bộ bài, không đưa thẳng đáp án chữ ngay từ đầu ở tiến trình này."
 )
 
-# Đọc sẵn nội dung PDF làm ngữ cảnh cho AI gợi ý
 pdf_content = extract_text_from_pdf("Test.pdf")
 
-# --- CHỈ CHẠY GIAO DIỆN CHAT KHI ĐÃ ĐIỀN API KEY ---
-if api_ready:
-    # --- BƯỚC 1: CHÀO HỎI TỰ ĐỘNG ---
+# --- GIAO DIỆN ỨNG DỤNG ---
+if api_ready and client:
     if st.session_state.current_step == "CHAO_HOI":
         welcome_text = "Chào em, thầy là trợ lý của thầy Long Bình. Hôm nay em cần thầy hỗ trợ bài tập nào? (Ví dụ nhập: Bài 1, Bài 2,...)"
         st.session_state.messages = [{"role": "assistant", "content": welcome_text}]
         st.session_state.current_step = "CHO_HOC_SINH_CHON_BAI"
+        st.session_state.chat_session = None
 
-    # Hiển thị lịch sử trò chuyện trực quan
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
 
-    # --- BƯỚC 2: NHẬN TÊN BÀI TẬP TỪ HỌC SINH ---
     if st.session_state.current_step == "CHO_HOC_SINH_CHON_BAI":
         if user_input := st.chat_input("Nhập tên bài tập tại đây..."):
             st.session_state.selected_lesson = user_input
@@ -100,7 +101,6 @@ if api_ready:
             st.session_state.current_step = "CHO_HOC_SINH_CHON_HUONG_GIAI"
             st.rerun()
 
-    # --- BƯỚC 3: PHÂN NHÁNH QUYẾT ĐỊNH ---
     elif st.session_state.current_step == "CHO_HOC_SINH_CHON_HUONG_GIAI":
         st.warning(f"Thầy đang xử lý yêu cầu cho: **{st.session_state.selected_lesson}**")
         st.write("Em muốn thầy hỗ trợ theo hướng nào dưới đây?")
@@ -109,14 +109,12 @@ if api_ready:
         cleaned_lesson = clean_text(st.session_state.selected_lesson)
         
         with col1:
-            # LUỒNG 1: AI đọc PDF và đưa ra gợi ý sư phạm từng bước nhỏ
             if st.button("📖 Gợi ý từng bước"):
                 st.session_state.messages.append({"role": "user", "content": "Gợi ý từng bước"})
                 st.session_state.current_step = "KICH_HOAT_GOI_Y_DAU_TIEN"
                 st.rerun()
                 
         with col2:
-            # LUỒNG 2: Xuất trực tiếp file ảnh đáp án từ folder images
             if st.button("🎯 Xem đáp án cụ thể"):
                 st.session_state.messages.append({"role": "user", "content": "Xem đáp án cụ thể"})
                 
@@ -135,37 +133,31 @@ if api_ready:
                 st.session_state.selected_lesson = None
                 st.button("Hỏi bài tập khác 🔄")
 
-    # --- LUỒNG GỢI Ý: KÍCH HOẠT AI ĐỌC PDF ĐỂ GỢI Ý CÂU ĐẦU TIÊN ---
+    # --- SỬ DỤNG CHAT SESSION ĐỂ TIẾT KIỆM QUOTA LƯỢT GỌI ---
     elif st.session_state.current_step == "KICH_HOAT_GOI_Y_DAU_TIEN":
-        # SỬA LỖI CHỮ VIẾT HOA TẠI ĐÂY (Thay St.spinner bằng st.spinner)
         with st.spinner("Thầy đang đọc tài liệu PDF để chuẩn bị câu hỏi gợi ý..."):
             lesson_org = st.session_state.selected_lesson
             
-            if pdf_content:
-                context_prompt = (
-                    f"{SYSTEM_PROMPT}\n"
-                    f"NỘI DUNG TÀI LIỆU TOÀN BỘ BÀI TẬP (PDF):\n{pdf_content}\n\n"
-                    f"YÊU CẦU: Học sinh đang cần hướng dẫn giải bài: '{lesson_org}'.\n"
-                    f"Hãy đối chiếu bài toán này trong tài liệu PDF để tìm câu hỏi, từ đó đưa ra câu hỏi gợi mở bước đầu tiên cho học sinh."
-                )
-            else:
-                context_prompt = (
-                    f"{SYSTEM_PROMPT}\n"
-                    f"Học sinh đang yêu cầu làm bài: {lesson_org} (Không tìm thấy file Test.pdf).\n"
-                    f"Hãy tự đưa ra câu hỏi gợi mở bước 1 dựa theo kiến thức toán học phổ thông cho bài này."
-                )
+            context_prompt = (
+                f"{SYSTEM_PROMPT}\n"
+                f"NỘI DUNG TÀI LIỆU TOÀN BỘ BÀI TẬP (PDF):\n{pdf_content}\n\n"
+                f"YÊU CẦU HIỆN TẠI: Học sinh chọn bài: '{lesson_org}'. "
+                f"Hãy tìm bài này trong PDF và đưa ra câu hỏi gợi mở bước đầu tiên."
+            )
 
             try:
-                response = model.generate_content(context_prompt).text
-                st.session_state.messages.append({"role": "assistant", "content": response})
+                # Khởi tạo phiên Chat có cấu trúc nhớ ngữ cảnh lâu dài
+                st.session_state.chat_session = client.chats.create(
+                    model=MODEL_NAME,
+                    config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT)
+                )
+                response = st.session_state.chat_session.send_message(context_prompt)
+                st.session_state.messages.append({"role": "assistant", "content": response.text})
                 st.session_state.current_step = "DANG_GOI_Y"
                 st.rerun()
             except Exception as e:
-                # In chi tiết lỗi kỹ thuật để thầy dễ dàng chẩn đoán kiểm tra API Key
-                st.error(f"Lỗi kết nối với Gemini AI: {e}")
-                st.info("💡 Mẹo: Thầy kiểm tra lại mã API Key ở sidebar hoặc hạn mức tài khoản xem sao nhé!")
+                st.error(f"Hệ thống bận hoặc hết hạn mức (Lỗi: {e}). Thầy hãy đợi vài giây rồi thử lại nhé!")
 
-    # --- LUỒNG GỢI Ý: TIẾP TỤC DẪN DẮT HỌC SINH GIẢI BÀI ---
     elif st.session_state.current_step == "DANG_GOI_Y":
         if user_input := st.chat_input("Nhập câu trả lời hoặc thắc mắc của em..."):
             st.session_state.messages.append({"role": "user", "content": user_input})
@@ -177,19 +169,10 @@ if api_ready:
                 st.session_state.selected_lesson = None
                 st.rerun()
             else:
-                lesson_org = st.session_state.selected_lesson
-                
-                context_prompt = (
-                    f"{SYSTEM_PROMPT}\n"
-                    f"NỘI DUNG TÀI LIỆU TOÀN BỘ BÀI TẬP (PDF):\n{pdf_content}\n\n"
-                    f"Ngữ cảnh: Học sinh đang giải bài: '{lesson_org}'.\n"
-                    f"Học sinh phản hồi: {user_input}.\n"
-                    f"Nhiệm vụ: Dựa vào nội dung bài tập trong tài liệu PDF, nhận xét câu trả lời của học sinh và đưa ra câu hỏi gợi mở bước tiếp theo."
-                )
-                        
                 try:
-                    response = model.generate_content(context_prompt).text
-                    st.session_state.messages.append({"role": "assistant", "content": response})
+                    # Gửi tin nhắn trực tiếp vào Chat Session hiện tại, không cần truyền lại PDF
+                    response = st.session_state.chat_session.send_message(user_input)
+                    st.session_state.messages.append({"role": "assistant", "content": response.text})
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Hệ thống gặp gián đoạn nhỏ từ AI: {e}")
+                    st.error(f"AI đang quá tải lượt gọi (Lỗi 429). Thầy/em vui lòng chờ khoảng 5-10 giây rồi gõ lại nhé!")
