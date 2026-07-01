@@ -1,6 +1,7 @@
 import streamlit as st
 import google.generativeai as genai
 import os
+import re
 from PIL import Image
 from pypdf import PdfReader
 
@@ -23,7 +24,24 @@ else:
     st.sidebar.warning("Vui lòng nhập mã API Key ở đây để kích hoạt ứng dụng.")
     st.info("👈 Thầy ơi, hãy nhập hoặc dán mã API Key vào ô bên góc trái để ứng dụng hoạt động nhé!")
 
-# --- 2. KHỞI TẠO TRẠNG THÁI CUỘC HỘI THOẠI (SESSION STATE) ---
+# --- 2. HÀM CHUẨN HÓA TIẾNG VIỆT KHÔNG DẤU (BÍ KÍP KHỚP DỮ LIỆU) ---
+def clean_text(text):
+    if not text:
+        return ""
+    text = text.lower()
+    # Thay thế các ký tự tiếng Việt có dấu thành không dấu
+    text = re.sub(r'[àáạảãâầấậẩẫăằắặẳẵ]', 'a', text)
+    text = re.sub(r'[èéẹẻẽêềếệểễ]', 'e', text)
+    text = re.sub(r'[ìíịỉĩ]', 'i', text)
+    text = re.sub(r'[òóọỏõôồốộổỗơờớợởỡ]', 'o', text)
+    text = re.sub(r'[ùúụủũưừứựửữ]', 'u', text)
+    text = re.sub(r'[ỳýỵỷỹ]', 'y', text)
+    text = re.sub(r'[đ]', 'd', text)
+    # Xóa toàn bộ khoảng trắng và ký tự đặc biệt như dấu hai chấm, dấu gạch ngang
+    text = re.sub(r'[\s\W_]', '', text)
+    return text
+
+# --- 3. KHỞI TẠO TRẠNG THÁI CUỘC HỘI THOẠI (SESSION STATE) ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "current_step" not in st.session_state:
@@ -52,22 +70,22 @@ def extract_text_from_pdf(pdf_path="Test.pdf"):
     except Exception:
         return None
 
-# Hàm tìm đường dẫn ảnh đáp án trong thư mục images
-def find_image_path(lesson):
-    possible_files = [
-        f"images/{lesson}.jpg", f"images/{lesson}.png", 
-        f"images/{lesson}.jpeg", f"images/{lesson}.JPG", f"images/{lesson}.PNG"
-    ]
-    for f_path in possible_files:
-        if os.path.exists(f_path):
-            return f_path
+# Hàm tìm đường dẫn ảnh đáp án trong thư mục images (Đã chuẩn hóa tên file)
+def find_image_path(lesson_cleaned):
+    if not os.path.exists("images"):
+        return None
+    # Quét toàn bộ file trong thư mục images để so sánh đối chiếu sau khi chuẩn hóa
+    for file_name in os.listdir("images"):
+        name_without_ext, ext = os.path.splitext(file_name)
+        if clean_text(name_without_ext) == lesson_cleaned:
+            return os.path.join("images", file_name)
     return None
 
 # --- CHỈ HIỂN THỊ VÀ CHẠY GIAO DIỆN CHAT KHI ĐÃ ĐIỀN API KEY ---
 if api_ready:
     # --- BƯỚC 1: CHÀO HỎI TỰ ĐỘNG ---
     if st.session_state.current_step == "CHAO_HOI":
-        welcome_text = "Chào em, thầy là trợ lý của thầy Long Bình. Hôm nay em cần thầy hỗ trợ bài tập nào? (Ví dụ nhập: bài 1, bài 2,...)"
+        welcome_text = "Chào em, thầy là trợ lý của thầy Long Bình. Hôm nay em cần thầy hỗ trợ bài tập nào? (Ví dụ nhập: Bài 1, Bài 2,...)"
         st.session_state.messages = [{"role": "assistant", "content": welcome_text}]
         st.session_state.current_step = "CHO_HOC_SINH_CHON_BAI"
 
@@ -79,17 +97,20 @@ if api_ready:
     # --- BƯỚC 2: NHẬN TÊN BÀI TẬP TỪ HỌC SINH ---
     if st.session_state.current_step == "CHO_HOC_SINH_CHON_BAI":
         if user_input := st.chat_input("Nhập tên bài tập tại đây..."):
-            st.session_state.selected_lesson = user_input.lower().replace(" ", "")
+            st.session_state.selected_lesson = user_input  # Giữ nguyên bản gốc để hiển thị giao diện
             st.session_state.messages.append({"role": "user", "content": user_input})
             st.session_state.current_step = "CHO_HOC_SINH_CHON_HUONG_GIAI"
             st.rerun()
 
     # --- BƯỚC 3: HIỂN THỊ LỰA CHỌN NÚT BẤM ---
     elif st.session_state.current_step == "CHO_HOC_SINH_CHON_HUONG_GIAI":
-        st.warning(f"Thầy đang xử lý yêu cầu cho bài: **{st.session_state.selected_lesson.upper()}**")
+        st.warning(f"Thầy đang xử lý yêu cầu cho: **{st.session_state.selected_lesson}**")
         st.write("Em muốn thầy hỗ trợ theo hướng nào dưới đây?")
         
         col1, col2 = st.columns(2)
+        
+        # Chuẩn hóa chuỗi nhập vào phục vụ so khớp logic ngầm
+        cleaned_lesson = clean_text(st.session_state.selected_lesson)
         
         with col1:
             if st.button("📖 Gợi ý từng bước"):
@@ -101,13 +122,13 @@ if api_ready:
             if st.button("🎯 Xem đáp án cụ thể"):
                 st.session_state.messages.append({"role": "user", "content": "Xem đáp án cụ thể"})
                 
-                img_path = find_image_path(st.session_state.selected_lesson)
+                img_path = find_image_path(cleaned_lesson)
                 if img_path:
                     with st.chat_message("assistant"):
-                        st.image(Image.open(img_path), caption=f"Đáp án chính xác cho bài {st.session_state.selected_lesson.upper()}")
-                    st.session_state.messages.append({"role": "assistant", "content": f"[Đã hiển thị ảnh đáp án bài {st.session_state.selected_lesson}]"})
+                        st.image(Image.open(img_path), caption=f"Đáp án chính xác cho {st.session_state.selected_lesson}")
+                    st.session_state.messages.append({"role": "assistant", "content": f"[Đã hiển thị ảnh đáp án cho {st.session_state.selected_lesson}]"})
                 else:
-                    err_msg = f"Thầy chưa tìm thấy file ảnh '{st.session_state.selected_lesson}.jpg' trong thư mục 'images'."
+                    err_msg = f"Thầy chưa tìm thấy file ảnh đáp án phù hợp với tên '{st.session_state.selected_lesson}' trong thư mục 'images'."
                     with st.chat_message("assistant"):
                         st.error(err_msg)
                     st.session_state.messages.append({"role": "assistant", "content": err_msg})
@@ -116,23 +137,24 @@ if api_ready:
                 st.session_state.selected_lesson = None
                 st.button("Hỏi bài tập khác 🔄")
 
-    # --- BƯỚC EXTRA: ĐỌC TÀI LIỆU PDF VÀ KÍCH HOẠT CÂU GỢI Ý ĐẦU TIÊN ---
+    # --- BƯỚC EXTRA: LỤC TÌM TRONG FILE PDF VÀ KÍCH HOẠT CÂU GỢI Ý ĐẦU TIÊN ---
     elif st.session_state.current_step == "KICH_HOAT_GOI_Y_DAU_TIEN":
-        with st.spinner("Thầy đang lục tìm đề bài trong file Test.pdf để chuẩn bị gợi ý..."):
-            lesson_key = st.session_state.selected_lesson
+        with St.spinner("Thầy đang lục tìm đề bài trong tài liệu để chuẩn bị gợi ý..."):
+            lesson_org = st.session_state.selected_lesson
             pdf_content = extract_text_from_pdf("Test.pdf")
             
             if pdf_content:
                 context_prompt = (
                     f"{SYSTEM_PROMPT}\n"
                     f"NỘI DUNG TÀI LIỆU TOÀN BỘ BÀI TẬP (PDF):\n{pdf_content}\n\n"
-                    f"YÊU CẦU: Học sinh đang cần hướng dẫn giải bài: {lesson_key.upper()}.\n"
-                    f"Hãy lục tìm nội dung bài này trong tài liệu trên, sau đó đưa ra câu chào và gợi ý/bước hỏi đầu tiên cho học sinh."
+                    f"YÊU CẦU: Học sinh đang cần hướng dẫn giải bài toán được nhập là: '{lesson_org}'.\n"
+                    f"Hãy dùng trí thông minh để quét và tìm phần nội dung tương ứng (Ví dụ: học sinh gõ 'bai1' hoặc 'bài 1' thì hãy đối chiếu với bài 'Bài 1' trong tài liệu).\n"
+                    f"Sau đó đưa ra câu chào và câu hỏi gợi mở bước đầu tiên cho học sinh."
                 )
             else:
                 context_prompt = (
                     f"{SYSTEM_PROMPT}\n"
-                    f"Học sinh đang yêu cầu làm bài: {lesson_key.upper()} (Không tìm thấy file Test.pdf trên hệ thống).\n"
+                    f"Học sinh đang yêu cầu làm bài: {lesson_org} (Không tìm thấy file Test.pdf trên hệ thống).\n"
                     f"Hãy tự đưa ra câu hỏi gợi mở bước 1 dựa theo kiến thức toán phổ thông cho bài này."
                 )
 
@@ -158,13 +180,13 @@ if api_ready:
                 st.session_state.selected_lesson = None
                 st.rerun()
             else:
-                lesson_key = st.session_state.selected_lesson
+                lesson_org = st.session_state.selected_lesson
                 pdf_content = extract_text_from_pdf("Test.pdf")
                 
                 context_prompt = (
                     f"{SYSTEM_PROMPT}\n"
                     f"NỘI DUNG TÀI LIỆU TOÀN BỘ BÀI TẬP (PDF):\n{pdf_content}\n\n"
-                    f"Ngữ cảnh: Học sinh đang giải bài: {lesson_key.upper()}.\n"
+                    f"Ngữ cảnh: Học sinh đang giải bài toán được nhập là: '{lesson_org}'.\n"
                     f"Học sinh phản hồi: {user_input}.\n"
                     f"Nhiệm vụ: Nhận xét câu trả lời và đưa ra câu hỏi gợi mở bước tiếp theo dựa trên tài liệu."
                 )
