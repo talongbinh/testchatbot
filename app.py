@@ -24,7 +24,7 @@ else:
     st.sidebar.warning("Vui lòng nhập mã API Key ở đây để kích hoạt ứng dụng.")
     st.info("👈 Thầy ơi, hãy nhập hoặc dán mã API Key vào ô bên góc trái để ứng dụng hoạt động nhé!")
 
-# --- 2. HÀM CHUẨN HÓA TIẾNG VIỆT KHÔNG DẤU (BÍ KÍP KHỚP DỮ LIỆU) ---
+# --- 2. HÀM CHUẨN HÓA TIẾNG VIỆT KHÔNG DẤU ---
 def clean_text(text):
     if not text:
         return ""
@@ -37,7 +37,7 @@ def clean_text(text):
     text = re.sub(r'[ùúụủũưừứựửữ]', 'u', text)
     text = re.sub(r'[ỳýỵỷỹ]', 'y', text)
     text = re.sub(r'[đ]', 'd', text)
-    # Xóa toàn bộ khoảng trắng và ký tự đặc biệt như dấu hai chấm, dấu gạch ngang
+    # Xóa toàn bộ khoảng trắng và ký tự đặc biệt
     text = re.sub(r'[\s\W_]', '', text)
     return text
 
@@ -70,11 +70,11 @@ def extract_text_from_pdf(pdf_path="Test.pdf"):
     except Exception:
         return None
 
-# Hàm tìm đường dẫn ảnh đáp án trong thư mục images (Đã chuẩn hóa tên file)
+# Hàm tìm đường dẫn ảnh đáp án trong thư mục images
 def find_image_path(lesson_cleaned):
     if not os.path.exists("images"):
         return None
-    # Quét toàn bộ file trong thư mục images để so sánh đối chiếu sau khi chuẩn hóa
+    # Quét toàn bộ file trong thư mục images để đối chiếu sau khi chuẩn hóa
     for file_name in os.listdir("images"):
         name_without_ext, ext = os.path.splitext(file_name)
         if clean_text(name_without_ext) == lesson_cleaned:
@@ -137,9 +137,9 @@ if api_ready:
                 st.session_state.selected_lesson = None
                 st.button("Hỏi bài tập khác 🔄")
 
-    # --- BƯỚC EXTRA: LỤC TÌM TRONG FILE PDF VÀ KÍCH HOẠT CÂU GỢI Ý ĐẦU TIÊN ---
+    # --- BƯỚC EXTRA: ĐỌC TÀI LIỆU PDF VÀ KÍCH HOẠT CÂU GỢI Ý ĐẦU TIÊN (ĐÃ SỬA CHỮ ST) ---
     elif st.session_state.current_step == "KICH_HOAT_GOI_Y_DAU_TIEN":
-        with St.spinner("Thầy đang lục tìm đề bài trong tài liệu để chuẩn bị gợi ý..."):
+        with st.spinner("Thầy đang lục tìm đề bài trong tài liệu để chuẩn bị gợi ý..."):
             lesson_org = st.session_state.selected_lesson
             pdf_content = extract_text_from_pdf("Test.pdf")
             
