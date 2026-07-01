@@ -9,20 +9,21 @@ from pypdf import PdfReader
 st.set_page_config(page_title="Trợ lý Học tập - Thầy Long Bình", page_icon="🤖")
 st.title("🤖 Trợ Lý Học Tập - Thầy Long Bình")
 
+# --- 1. CẤU HÌNH DANH SÁCH API KEY (BẢO MẬT AN TOÀN) ---
 st.sidebar.header("🔑 Cấu hình danh sách API Key")
-st.sidebar.write("Thầy dán danh sách Key vào đây (mỗi dòng 1 Key). Hệ thống sẽ tự động xoay vòng để tránh quá tải:")
+st.sidebar.write("Thầy dán danh sách Key vào đây (mỗi dòng 1 Key). Hệ thống sẽ tự động xoay vòng:")
 
-# Khung nhập Key trống để đảm bảo an toàn, không lưu đè Key lên GitHub
-keys_input = st.sidebar.text_area("Danh sách API Keys của thầy:", height=120, type="password", placeholder="Dán các mã Key của thầy vào đây, mỗi mã một dòng...")
+# Ô nhập liệu tối giản hóa để tránh lỗi hệ thống hoàn toàn
+keys_input = st.sidebar.text_area("Danh sách API Keys của thầy:", height=150)
 
-# Tách danh sách các Key sạch sẽ
+# Tách danh sách các Key sạch sẽ dựa trên các dòng văn bản
 api_keys_list = [k.strip() for k in keys_input.split("\n") if k.strip()]
 
-# Thiết lập chỉ số Key đang sử dụng trong Session State
+# Thiết lập chỉ số dòng Key đang sử dụng trong Session State
 if "key_index" not in st.session_state:
     st.session_state.key_index = 0
 
-# --- HÀM KHỞI TẠO CLIENT TỰ ĐỘNG XOAY VÒNG KEY KHI LỖI QUÁ TẢI ---
+# --- HÀM KHỞI TẠO CLIENT TỰ ĐỘNG XOAY VÒNG KEY ---
 def get_gemini_client():
     if not api_keys_list:
         return None
@@ -40,12 +41,12 @@ def rotate_api_key():
         return True
     return False
 
-# Kiểm tra trạng thái kích hoạt hệ thống
+# Kiểm tra trạng thái sẵn sàng
 api_ready = len(api_keys_list) > 0
 
 if not api_ready:
     st.sidebar.warning("Vui lòng nhập danh sách mã API Key để kích hoạt ứng dụng.")
-    st.info("👈 Thầy ơi, hãy dán 3 mã API Key của thầy (mỗi dòng một mã) vào ô trống bên góc trái này để bắt đầu nhé!")
+    st.info("👈 Thầy ơi, hãy dán các mã API Key của thầy (mỗi dòng một mã) vào ô trống bên góc trái này nhé!")
 
 # --- 2. HÀM CHUẨN HÓA TIẾNG VIỆT KHÔNG DẤU ---
 def clean_text(text):
@@ -212,7 +213,7 @@ if api_ready:
                                 full_context = f"Tài liệu PDF ngữ cảnh:\n{pdf_content}\n\nHọc sinh đang trao đổi tiếp câu hỏi bài tập. Đây là câu trả lời mới nhất của học sinh: {user_input}"
                                 response = st.session_state.chat_session.send_message(full_context)
                                 st.session_state.messages.append({"role": "assistant", "content": response.text})
-                                rerun()
+                                st.rerun()
                             except Exception:
                                 continue
                         else:
