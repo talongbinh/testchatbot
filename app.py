@@ -9,17 +9,12 @@ from pypdf import PdfReader
 st.set_page_config(page_title="Trợ lý Học tập - Thầy Long Bình", page_icon="🤖")
 st.title("🤖 Trợ Lý Học Tập - Thầy Long Bình")
 
-# --- 1. CẤU HÌNH DANH SÁCH API KEY (BẢO MẬT AN TOÀN) ---
-st.sidebar.header("🔑 Cấu hình danh sách API Key")
-st.sidebar.write("Thầy dán danh sách Key vào đây (mỗi dòng 1 Key). Hệ thống sẽ tự động xoay vòng:")
+# --- 1. ĐỌC DANH SÁCH API KEY TỪ SECRETS (BẢO MẬT TUYỆT ĐỐI) ---
+api_keys_list = []
+if "GEMINI_API_KEYS" in st.secrets:
+    api_keys_list = st.secrets["GEMINI_API_KEYS"]
 
-# Ô nhập liệu tối giản hóa để tránh lỗi hệ thống hoàn toàn
-keys_input = st.sidebar.text_area("Danh sách API Keys của thầy:", height=150)
-
-# Tách danh sách các Key sạch sẽ dựa trên các dòng văn bản
-api_keys_list = [k.strip() for k in keys_input.split("\n") if k.strip()]
-
-# Thiết lập chỉ số dòng Key đang sử dụng trong Session State
+# Thiết lập chỉ số xoay vòng Key trong Session State
 if "key_index" not in st.session_state:
     st.session_state.key_index = 0
 
@@ -34,19 +29,15 @@ def get_gemini_client():
     except Exception:
         return None
 
-# --- HÀM TỰ ĐỘNG ĐỔI SANG KEY TIẾP THEO ---
+# --- HÀM TỰ ĐỘNG ĐỔI SANG KEY DỰ PHÒNG KHI GẶP LỖI QUÁ TẢI ---
 def rotate_api_key():
     if len(api_keys_list) > 1:
         st.session_state.key_index = (st.session_state.key_index + 1) % len(api_keys_list)
         return True
     return False
 
-# Kiểm tra trạng thái sẵn sàng
+# Kiểm tra hệ thống Secrets đã cấu hình chưa
 api_ready = len(api_keys_list) > 0
-
-if not api_ready:
-    st.sidebar.warning("Vui lòng nhập danh sách mã API Key để kích hoạt ứng dụng.")
-    st.info("👈 Thầy ơi, hãy dán các mã API Key của thầy (mỗi dòng một mã) vào ô trống bên góc trái này nhé!")
 
 # --- 2. HÀM CHUẨN HÓA TIẾNG VIỆT KHÔNG DẤU ---
 def clean_text(text):
@@ -218,3 +209,6 @@ if api_ready:
                                 continue
                         else:
                             st.warning("🤖 AI đang xử lý dồn ứ tin nhắn. Em hãy chờ 5 giây rồi gõ lại câu trả lời nhé!")
+                            break
+else:
+    st.error("Hệ thống chưa được cấu hình API Keys ngầm. Thầy Bình vui lòng cài đặt Keys trong mục Secrets của Streamlit Cloud nhé!")
