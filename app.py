@@ -16,7 +16,7 @@ api_ready = False
 if api_key_input:
     try:
         genai.configure(api_key=api_key_input)
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-3.0-flash")
         api_ready = True
     except Exception:
         st.sidebar.error("Mã API Key không hợp lệ. Thầy kiểm tra lại nhé!")
