@@ -9,23 +9,43 @@ from pypdf import PdfReader
 st.set_page_config(page_title="Trợ lý Học tập - Thầy Long Bình", page_icon="🤖")
 st.title("🤖 Trợ Lý Học Tập - Thầy Long Bình")
 
-# --- 1. CẤU HÌNH API KEY TẠI SIDEBAR ---
-st.sidebar.header("🔑 Cấu hình hệ thống")
-api_key_input = st.sidebar.text_input("Nhập API Key của thầy:", type="password")
+st.sidebar.header("🔑 Cấu hình danh sách API Key")
+st.sidebar.write("Thầy dán danh sách Key vào đây (mỗi dòng 1 Key). Hệ thống sẽ tự động xoay vòng để tránh quá tải:")
 
-client = None
-api_ready = False
+# Khung nhập Key trống để đảm bảo an toàn, không lưu đè Key lên GitHub
+keys_input = st.sidebar.text_area("Danh sách API Keys của thầy:", height=120, type="password", placeholder="Dán các mã Key của thầy vào đây, mỗi mã một dòng...")
 
-if api_key_input:
+# Tách danh sách các Key sạch sẽ
+api_keys_list = [k.strip() for k in keys_input.split("\n") if k.strip()]
+
+# Thiết lập chỉ số Key đang sử dụng trong Session State
+if "key_index" not in st.session_state:
+    st.session_state.key_index = 0
+
+# --- HÀM KHỞI TẠO CLIENT TỰ ĐỘNG XOAY VÒNG KEY KHI LỖI QUÁ TẢI ---
+def get_gemini_client():
+    if not api_keys_list:
+        return None
+    idx = st.session_state.key_index % len(api_keys_list)
+    current_key = api_keys_list[idx]
     try:
-        client = genai.Client(api_key=api_key_input)
-        MODEL_NAME = "gemini-2.5-flash"
-        api_ready = True
-    except Exception as e:
-        st.sidebar.error(f"Lỗi cấu hình API Key: {e}")
-else:
-    st.sidebar.warning("Vui lòng nhập mã API Key ở đây để kích hoạt ứng dụng.")
-    st.info("👈 Thầy ơi, hãy nhập hoặc dán mã API Key vào ô bên góc trái để ứng dụng hoạt động nhé!")
+        return genai.Client(api_key=current_key)
+    except Exception:
+        return None
+
+# --- HÀM TỰ ĐỘNG ĐỔI SANG KEY TIẾP THEO ---
+def rotate_api_key():
+    if len(api_keys_list) > 1:
+        st.session_state.key_index = (st.session_state.key_index + 1) % len(api_keys_list)
+        return True
+    return False
+
+# Kiểm tra trạng thái kích hoạt hệ thống
+api_ready = len(api_keys_list) > 0
+
+if not api_ready:
+    st.sidebar.warning("Vui lòng nhập danh sách mã API Key để kích hoạt ứng dụng.")
+    st.info("👈 Thầy ơi, hãy dán 3 mã API Key của thầy (mỗi dòng một mã) vào ô trống bên góc trái này để bắt đầu nhé!")
 
 # --- 2. HÀM CHUẨN HÓA TIẾNG VIỆT KHÔNG DẤU ---
 def clean_text(text):
@@ -80,10 +100,13 @@ SYSTEM_PROMPT = (
     "TUYỆT ĐỐI KHÔNG ĐƯỢC giải hết toàn bộ bài, không đưa thẳng đáp án chữ ngay từ đầu ở tiến trình này."
 )
 
+MODEL_NAME = "gemini-2.5-flash"
 pdf_content = extract_text_from_pdf("Test.pdf")
 
-# --- GIAO DIỆN ỨNG DỤNG ---
-if api_ready and client:
+# --- GIAO DIỆN ỨNG DỤNG CHÍNH ---
+if api_ready:
+    client = get_gemini_client()
+    
     if st.session_state.current_step == "CHAO_HOI":
         welcome_text = "Chào em, thầy là trợ lý của thầy Long Bình. Hôm nay em cần thầy hỗ trợ bài tập nào? (Ví dụ nhập: Bài 1, Bài 2,...)"
         st.session_state.messages = [{"role": "assistant", "content": welcome_text}]
@@ -133,11 +156,10 @@ if api_ready and client:
                 st.session_state.selected_lesson = None
                 st.button("Hỏi bài tập khác 🔄")
 
-    # --- SỬ DỤNG CHAT SESSION ĐỂ TIẾT KIỆM QUOTA LƯỢT GỌI ---
+    # --- LUỒNG LUÂN PHIÊN KEY ---
     elif st.session_state.current_step == "KICH_HOAT_GOI_Y_DAU_TIEN":
         with st.spinner("Thầy đang đọc tài liệu PDF để chuẩn bị câu hỏi gợi ý..."):
             lesson_org = st.session_state.selected_lesson
-            
             context_prompt = (
                 f"{SYSTEM_PROMPT}\n"
                 f"NỘI DUNG TÀI LIỆU TOÀN BỘ BÀI TẬP (PDF):\n{pdf_content}\n\n"
@@ -145,18 +167,23 @@ if api_ready and client:
                 f"Hãy tìm bài này trong PDF và đưa ra câu hỏi gợi mở bước đầu tiên."
             )
 
-            try:
-                # Khởi tạo phiên Chat có cấu trúc nhớ ngữ cảnh lâu dài
-                st.session_state.chat_session = client.chats.create(
-                    model=MODEL_NAME,
-                    config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT)
-                )
-                response = st.session_state.chat_session.send_message(context_prompt)
-                st.session_state.messages.append({"role": "assistant", "content": response.text})
-                st.session_state.current_step = "DANG_GOI_Y"
-                st.rerun()
-            except Exception as e:
-                st.error(f"Hệ thống bận hoặc hết hạn mức (Lỗi: {e}). Thầy hãy đợi vài giây rồi thử lại nhé!")
+            for _ in range(len(api_keys_list)):
+                client = get_gemini_client()
+                try:
+                    st.session_state.chat_session = client.chats.create(
+                        model=MODEL_NAME,
+                        config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT)
+                    )
+                    response = st.session_state.chat_session.send_message(context_prompt)
+                    st.session_state.messages.append({"role": "assistant", "content": response.text})
+                    st.session_state.current_step = "DANG_GOI_Y"
+                    st.rerun()
+                except Exception as e:
+                    if "429" in str(e) and rotate_api_key():
+                        continue  
+                    else:
+                        st.error(f"Hệ thống bận (Lỗi: {e}). Thầy/em chờ vài giây rồi gõ lại nhé!")
+                        break
 
     elif st.session_state.current_step == "DANG_GOI_Y":
         if user_input := st.chat_input("Nhập câu trả lời hoặc thắc mắc của em..."):
@@ -169,10 +196,24 @@ if api_ready and client:
                 st.session_state.selected_lesson = None
                 st.rerun()
             else:
-                try:
-                    # Gửi tin nhắn trực tiếp vào Chat Session hiện tại, không cần truyền lại PDF
-                    response = st.session_state.chat_session.send_message(user_input)
-                    st.session_state.messages.append({"role": "assistant", "content": response.text})
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"AI đang quá tải lượt gọi (Lỗi 429). Thầy/em vui lòng chờ khoảng 5-10 giây rồi gõ lại nhé!")
+                for _ in range(len(api_keys_list)):
+                    try:
+                        response = st.session_state.chat_session.send_message(user_input)
+                        st.session_state.messages.append({"role": "assistant", "content": response.text})
+                        st.rerun()
+                    except Exception as e:
+                        if "429" in str(e) and rotate_api_key():
+                            client = get_gemini_client()
+                            try:
+                                st.session_state.chat_session = client.chats.create(
+                                    model=MODEL_NAME,
+                                    config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT)
+                                )
+                                full_context = f"Tài liệu PDF ngữ cảnh:\n{pdf_content}\n\nHọc sinh đang trao đổi tiếp câu hỏi bài tập. Đây là câu trả lời mới nhất của học sinh: {user_input}"
+                                response = st.session_state.chat_session.send_message(full_context)
+                                st.session_state.messages.append({"role": "assistant", "content": response.text})
+                                rerun()
+                            except Exception:
+                                continue
+                        else:
+                            st.warning("🤖 AI đang xử lý dồn ứ tin nhắn. Em hãy chờ 5 giây rồi gõ lại câu trả lời nhé!")
