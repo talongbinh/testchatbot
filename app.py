@@ -4,14 +4,24 @@ import os
 from PIL import Image
 from pypdf import PdfReader
 
-# --- 1. CẤU HÌNH BẢO MẬT API KEY ---
-try:
-    genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
-    model = genai.GenerativeModel("gemini-3.0-flash")
-except Exception:
-    st.error("Chưa cấu hình API Key trong mục Secrets của Streamlit Cloud!")
-
 st.title("🤖 Trợ Lý Học Tập - Thầy Long Bình")
+
+# --- 1. ĐƯA Ô NHẬP API KEY QUAY TRỞ LẠI SIDEBAR ---
+st.sidebar.header("🔑 Cấu hình hệ thống")
+api_key_input = st.sidebar.text_input("Nhập API Key của thầy:", type="password")
+
+# Kiểm tra và kích hoạt API Key trực tiếp từ sidebar
+api_ready = False
+if api_key_input:
+    try:
+        genai.configure(api_key=api_key_input)
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        api_ready = True
+    except Exception:
+        st.sidebar.error("Mã API Key không hợp lệ. Thầy kiểm tra lại nhé!")
+else:
+    st.sidebar.warning("Vui lòng nhập mã API Key ở đây để kích hoạt ứng dụng.")
+    st.info("👈 Thầy ơi, hãy nhập hoặc dán mã API Key vào ô bên góc trái để ứng dụng hoạt động nhé!")
 
 # --- 2. KHỞI TẠO TRẠNG THÁI CUỘC HỘI THOẠI (SESSION STATE) ---
 if "messages" not in st.session_state:
@@ -29,7 +39,7 @@ SYSTEM_PROMPT = (
     "TUYỆT ĐỐI KHÔNG ĐƯỢC giải hết toàn bộ bài, không đưa thẳng đáp án chữ ngay từ đầu."
 )
 
-# Hàm đọc văn bản từ file Test.pdf để gửi cho AI
+# Hàm đọc văn bản từ file Test.pdf
 def extract_text_from_pdf(pdf_path="Test.pdf"):
     if not os.path.exists(pdf_path):
         return None
@@ -53,116 +63,115 @@ def find_image_path(lesson):
             return f_path
     return None
 
-# --- BƯỚC 1: CHÀO HỎI TỰ ĐỘNG ---
-if st.session_state.current_step == "CHAO_HOI":
-    welcome_text = "Chào em, thầy là trợ lý của thầy Long Bình. Hôm nay em cần thầy hỗ trợ bài tập nào? (Ví dụ nhập: bài 1, bài 2,...)"
-    st.session_state.messages = [{"role": "assistant", "content": welcome_text}]
-    st.session_state.current_step = "CHO_HOC_SINH_CHON_BAI"
+# --- CHỈ HIỂN THỊ VÀ CHẠY GIAO DIỆN CHAT KHI ĐÃ ĐIỀN API KEY ---
+if api_ready:
+    # --- BƯỚC 1: CHÀO HỎI TỰ ĐỘNG ---
+    if st.session_state.current_step == "CHAO_HOI":
+        welcome_text = "Chào em, thầy là trợ lý của thầy Long Bình. Hôm nay em cần thầy hỗ trợ bài tập nào? (Ví dụ nhập: bài 1, bài 2,...)"
+        st.session_state.messages = [{"role": "assistant", "content": welcome_text}]
+        st.session_state.current_step = "CHO_HOC_SINH_CHON_BAI"
 
-# Hiển thị lịch sử trò chuyện
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.write(msg["content"])
+    # Hiển thị lịch sử trò chuyện
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.write(msg["content"])
 
-# --- BƯỚC 2: NHẬN TÊN BÀI TẬP TỪ HỌC SINH ---
-if st.session_state.current_step == "CHO_HOC_SINH_CHON_BAI":
-    if user_input := st.chat_input("Nhập tên bài tập tại đây..."):
-        st.session_state.selected_lesson = user_input.lower().replace(" ", "")
-        st.session_state.messages.append({"role": "user", "content": user_input})
-        st.session_state.current_step = "CHO_HOC_SINH_CHON_HUONG_GIAI"
-        st.rerun()
-
-# --- BƯỚC 3: HIỂN THỊ LỰA CHỌN NÚT BẤM ---
-elif st.session_state.current_step == "CHO_HOC_SINH_CHON_HUONG_GIAI":
-    st.warning(f"Thầy đang xử lý yêu cầu cho bài: **{st.session_state.selected_lesson.upper()}**")
-    st.write("Em muốn thầy hỗ trợ theo hướng nào dưới đây?")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        if st.button("📖 Gợi ý từng bước"):
-            st.session_state.messages.append({"role": "user", "content": "Gợi ý từng bước"})
-            st.session_state.current_step = "KICH_HOAT_GOI_Y_DAU_TIEN"
+    # --- BƯỚC 2: NHẬN TÊN BÀI TẬP TỪ HỌC SINH ---
+    if st.session_state.current_step == "CHO_HOC_SINH_CHON_BAI":
+        if user_input := st.chat_input("Nhập tên bài tập tại đây..."):
+            st.session_state.selected_lesson = user_input.lower().replace(" ", "")
+            st.session_state.messages.append({"role": "user", "content": user_input})
+            st.session_state.current_step = "CHO_HOC_SINH_CHON_HUONG_GIAI"
             st.rerun()
-            
-    with col2:
-        if st.button("🎯 Xem đáp án cụ thể"):
-            st.session_state.messages.append({"role": "user", "content": "Xem đáp án cụ thể"})
-            
-            img_path = find_image_path(st.session_state.selected_lesson)
-            if img_path:
-                with st.chat_message("assistant"):
-                    st.image(Image.open(img_path), caption=f"Đáp án chính xác cho bài {st.session_state.selected_lesson.upper()}")
-                st.session_state.messages.append({"role": "assistant", "content": f"[Đã hiển thị ảnh đáp án bài {st.session_state.selected_lesson}]"})
-            else:
-                err_msg = f"Thầy chưa tìm thấy file ảnh '{st.session_state.selected_lesson}.jpg' trong thư mục 'images'."
-                with st.chat_message("assistant"):
-                    st.error(err_msg)
-                st.session_state.messages.append({"role": "assistant", "content": err_msg})
-            
-            st.session_state.current_step = "CHAO_HOI"
-            st.session_state.selected_lesson = None
-            st.button("Hỏi bài tập khác 🔄")
 
-# --- BƯỚC EXTRA: ĐỌC FILE PDF VÀ KÍCH HOẠT CÂU GỢI Ý ĐẦU TIÊN ---
-elif st.session_state.current_step == "KICH_HOAT_GOI_Y_DAU_TIEN":
-    with st.spinner("Thầy đang đọc tài liệu Test.pdf để tìm đề bài và gợi ý..."):
-        lesson_key = st.session_state.selected_lesson
+    # --- BƯỚC 3: HIỂN THỊ LỰA CHỌN NÚT BẤM ---
+    elif st.session_state.current_step == "CHO_HOC_SINH_CHON_HUONG_GIAI":
+        st.warning(f"Thầy đang xử lý yêu cầu cho bài: **{st.session_state.selected_lesson.upper()}**")
+        st.write("Em muốn thầy hỗ trợ theo hướng nào dưới đây?")
         
-        # Đọc dữ liệu chữ từ file Test.pdf để làm "bộ não" cho AI
-        pdf_content = extract_text_from_pdf("Test.pdf")
+        col1, col2 = st.columns(2)
         
-        if pdf_content:
-            context_prompt = (
-                f"{SYSTEM_PROMPT}\n"
-                f"NỘI DUNG TÀI LIỆU TOÀN BỘ BÀI TẬP (PDF):\n{pdf_content}\n\n"
-                f"YÊU CẦU: Học sinh đang cần hướng dẫn giải bài: {lesson_key.upper()}.\n"
-                f"Hãy lục tìm nội dung bài này trong tài liệu trên, sau đó đưa ra câu chào và gợi ý/bước hỏi đầu tiên cho học sinh."
-            )
-        else:
-            # Phương án dự phòng nếu quên chưa up file Test.pdf lên GitHub
-            context_prompt = (
-                f"{SYSTEM_PROMPT}\n"
-                f"Học sinh đang yêu cầu làm bài: {lesson_key.upper()} (Không tìm thấy file Test.pdf trên hệ thống).\n"
-                f"Hãy tự đưa ra câu hỏi gợi mở bước 1 dựa theo kiến thức toán phổ thông cho bài này."
-            )
-
-        try:
-            response = model.generate_content(context_prompt).text
-            st.session_state.messages.append({"role": "assistant", "content": response})
-            st.session_state.current_step = "DANG_GOI_Y"
-            st.rerun()
-        except Exception:
-            st.error("Gặp gián đoạn khi kết nối với AI. Em vui lòng gõ tin nhắn bất kỳ để thử lại nhé!")
-            if user_input := st.chat_input("Gõ chữ bất kỳ để thử lại..."):
+        with col1:
+            if st.button("📖 Gợi ý từng bước"):
+                st.session_state.messages.append({"role": "user", "content": "Gợi ý từng bước"})
+                st.session_state.current_step = "KICH_HOAT_GOI_Y_DAU_TIEN"
                 st.rerun()
+                
+        with col2:
+            if st.button("🎯 Xem đáp án cụ thể"):
+                st.session_state.messages.append({"role": "user", "content": "Xem đáp án cụ thể"})
+                
+                img_path = find_image_path(st.session_state.selected_lesson)
+                if img_path:
+                    with st.chat_message("assistant"):
+                        st.image(Image.open(img_path), caption=f"Đáp án chính xác cho bài {st.session_state.selected_lesson.upper()}")
+                    st.session_state.messages.append({"role": "assistant", "content": f"[Đã hiển thị ảnh đáp án bài {st.session_state.selected_lesson}]"})
+                else:
+                    err_msg = f"Thầy chưa tìm thấy file ảnh '{st.session_state.selected_lesson}.jpg' trong thư mục 'images'."
+                    with st.chat_message("assistant"):
+                        st.error(err_msg)
+                    st.session_state.messages.append({"role": "assistant", "content": err_msg})
+                
+                st.session_state.current_step = "CHAO_HOI"
+                st.session_state.selected_lesson = None
+                st.button("Hỏi bài tập khác 🔄")
 
-# --- BƯỚC 4: TIẾN TRÌNH THẢO LUẬN, GỢI Ý TIẾP THEO ---
-elif st.session_state.current_step == "DANG_GOI_Y":
-    if user_input := st.chat_input("Nhập câu trả lời hoặc thắc mắc của em..."):
-        st.session_state.messages.append({"role": "user", "content": user_input})
-        
-        if "xong" in user_input.lower() or "hoàn thành" in user_input.lower():
-            feedback = "Tuyệt vời! Em làm tốt lắm. Hãy chuẩn bị sang bài tập tiếp theo nhé!"
-            st.session_state.messages.append({"role": "assistant", "content": feedback})
-            st.session_state.current_step = "CHAO_HOI"
-            st.session_state.selected_lesson = None
-            st.rerun()
-        else:
+    # --- BƯỚC EXTRA: ĐỌC TÀI LIỆU PDF VÀ KÍCH HOẠT CÂU GỢI Ý ĐẦU TIÊN ---
+    elif st.session_state.current_step == "KICH_HOAT_GOI_Y_DAU_TIEN":
+        with st.spinner("Thầy đang lục tìm đề bài trong file Test.pdf để chuẩn bị gợi ý..."):
             lesson_key = st.session_state.selected_lesson
             pdf_content = extract_text_from_pdf("Test.pdf")
             
-            context_prompt = (
-                f"{SYSTEM_PROMPT}\n"
-                f"NỘI DUNG TÀI LIỆU TOÀN BỘ BÀI TẬP (PDF):\n{pdf_content}\n\n"
-                f"Ngữ cảnh: Học sinh đang giải bài: {lesson_key.upper()}.\n"
-                f"Học sinh phản hồi: {user_input}.\n"
-                f"Nhiệm vụ: Nhận xét câu trả lời và đưa ra câu hỏi gợi mở bước tiếp theo dựa trên tài liệu."
-            )
-                    
+            if pdf_content:
+                context_prompt = (
+                    f"{SYSTEM_PROMPT}\n"
+                    f"NỘI DUNG TÀI LIỆU TOÀN BỘ BÀI TẬP (PDF):\n{pdf_content}\n\n"
+                    f"YÊU CẦU: Học sinh đang cần hướng dẫn giải bài: {lesson_key.upper()}.\n"
+                    f"Hãy lục tìm nội dung bài này trong tài liệu trên, sau đó đưa ra câu chào và gợi ý/bước hỏi đầu tiên cho học sinh."
+                )
+            else:
+                context_prompt = (
+                    f"{SYSTEM_PROMPT}\n"
+                    f"Học sinh đang yêu cầu làm bài: {lesson_key.upper()} (Không tìm thấy file Test.pdf trên hệ thống).\n"
+                    f"Hãy tự đưa ra câu hỏi gợi mở bước 1 dựa theo kiến thức toán phổ thông cho bài này."
+                )
+
             try:
                 response = model.generate_content(context_prompt).text
                 st.session_state.messages.append({"role": "assistant", "content": response})
+                st.session_state.current_step = "DANG_GOI_Y"
                 st.rerun()
             except Exception:
-                st.error("Hệ thống gặp gián đoạn nhỏ, em thử gõ lại câu trả lời nhé!")
+                st.error("Gặp gián đoạn khi kết nối với AI. Em vui lòng gõ tin nhắn bất kỳ để thử lại nhé!")
+                if user_input := st.chat_input("Gõ chữ bất kỳ để thử lại..."):
+                    st.rerun()
+
+    # --- BƯỚC 4: TIẾN TRÌNH THẢO LUẬN, GỢI Ý TIẾP THEO ---
+    elif st.session_state.current_step == "DANG_GOI_Y":
+        if user_input := st.chat_input("Nhập câu trả lời hoặc thắc mắc của em..."):
+            st.session_state.messages.append({"role": "user", "content": user_input})
+            
+            if "xong" in user_input.lower() or "hoàn thành" in user_input.lower():
+                feedback = "Tuyệt vời! Em làm tốt lắm. Hãy chuẩn bị sang bài tập tiếp theo nhé!"
+                st.session_state.messages.append({"role": "assistant", "content": feedback})
+                st.session_state.current_step = "CHAO_HOI"
+                st.session_state.selected_lesson = None
+                st.rerun()
+            else:
+                lesson_key = st.session_state.selected_lesson
+                pdf_content = extract_text_from_pdf("Test.pdf")
+                
+                context_prompt = (
+                    f"{SYSTEM_PROMPT}\n"
+                    f"NỘI DUNG TÀI LIỆU TOÀN BỘ BÀI TẬP (PDF):\n{pdf_content}\n\n"
+                    f"Ngữ cảnh: Học sinh đang giải bài: {lesson_key.upper()}.\n"
+                    f"Học sinh phản hồi: {user_input}.\n"
+                    f"Nhiệm vụ: Nhận xét câu trả lời và đưa ra câu hỏi gợi mở bước tiếp theo dựa trên tài liệu."
+                )
+                        
+                try:
+                    response = model.generate_content(context_prompt).text
+                    st.session_state.messages.append({"role": "assistant", "content": response})
+                    st.rerun()
+                except Exception:
+                    st.error("Hệ thống gặp gián đoạn nhỏ, em thử gõ lại câu trả lời nhé!")
